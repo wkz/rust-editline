@@ -1,0 +1,7 @@
+[package]
+name = "editline"
+version = "0.1.0"
+authors = ["Tobias Waldekranz <tobias@waldekranz.com>"]
+
+[dependencies]
+libc = "0.1.8"
