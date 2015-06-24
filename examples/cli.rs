@@ -6,11 +6,6 @@ const CMDS : [&'static str; 8] = [
     "ls ", "cd ", "malloc ", "tee "
 ];
 
-extern fn do_exit() -> Status {
-    println!("Bye bye!");
-    return Status::EOF;
-}
-
 fn list_possib(line: &str) -> Vec<&str> {
     let mut matches = Vec::<&str>::new();
 
@@ -23,19 +18,32 @@ fn list_possib(line: &str) -> Vec<&str> {
     matches
 }
 
+fn complete(line: &str) -> Option<&str> {
+    let possib = list_possib(line);
+
+    match possib.len() {
+        1 => Some(&possib[0][line.len()..]),
+        _ => None,
+    }
+}
+
+extern fn do_exit() -> Status {
+    println!("Bye bye!");
+    return Status::EOF;
+}
+
 fn main() {
     set_list_possib(list_possib);
-    
-    bind_key(Key::Meta('d'), do_exit);
+    set_complete(complete);
+
+    bind_key(Key::Ctrl('d'), do_exit);
 
     assert!(read_history("/tmp/editrs.history").is_ok());
-    
-    loop {
-        let line = readline("test> ");
 
-        println!("got: {}", line);
-        if line == "exit" {
-            break;
+    loop {
+        match readline("cli> ") {
+            Some(line) => println!("\t\t\t|{}|", line),
+            None => break
         }
     }
 
