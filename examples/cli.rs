@@ -6,11 +6,11 @@ const CMDS : [&'static str; 8] = [
     "ls ", "cd ", "malloc ", "tee "
 ];
 
-fn list_possib(line: &str) -> Vec<&str> {
+fn list_possib(word: &str) -> Vec<&str> {
     let mut matches = Vec::<&str>::new();
 
     for cmd in &CMDS {
-        if cmd.starts_with(line) {
+        if cmd.starts_with(word) {
             matches.push(cmd)
         }
     }
@@ -18,11 +18,11 @@ fn list_possib(line: &str) -> Vec<&str> {
     matches
 }
 
-fn complete(line: &str) -> Option<&str> {
-    let possib = list_possib(line);
+fn complete(word: &str) -> Option<&str> {
+    let possib = list_possib(word);
 
     match possib.len() {
-        1 => Some(&possib[0][line.len()..]),
+        1 => Some(&possib[0][word.len()..]),
         _ => None,
     }
 }
@@ -38,7 +38,7 @@ fn main() {
 
     bind_key(Key::Ctrl('d'), do_exit);
 
-    assert!(read_history("/tmp/editrs.history").is_ok());
+    assert!(read_history("/tmp/editrs.history"));
 
     loop {
         match readline("cli> ") {
@@ -47,5 +47,5 @@ fn main() {
         }
     }
 
-    assert!(write_history("/tmp/editrs.history").is_ok());
+    assert!(write_history("/tmp/editrs.history"));
 }

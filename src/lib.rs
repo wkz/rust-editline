@@ -1,12 +1,16 @@
 extern crate libc;
 
-use libc::{c_char, c_int, malloc, size_t};
+use libc::{c_char, c_int, c_void, free, malloc, size_t};
 
 use std::ffi;
 use std::io;
 use std::mem;
 use std::ptr;
 use std::str;
+
+macro_rules! require {
+    ($e:expr) => (match $e { Some(e) => e, None => return None })
+}
 
 mod c {
     use libc::{c_char, c_int};
@@ -26,6 +30,8 @@ mod c {
 
     #[link(name = "editline")]
     extern {
+        pub static rl_line_buffer : *mut c_char;
+
         pub fn readline(prompt: *const c_char) -> *mut c_char;
 
         pub fn read_history(filename: *const c_char) -> c_int;
@@ -40,63 +46,77 @@ mod c {
     }
 }
 
-
-pub fn readline(prompt: &str) -> Option<&str> {
-    let c_prompt = ffi::CString::new(prompt);
-    if c_prompt.is_err() {
+fn cstr_to_str<'a>(c_s: *const c_char) -> Option<&'a str> {
+    if c_s.is_null() {
         return None
     }
 
-    let c_line_ptr = unsafe { c::readline(c_prompt.unwrap().as_ptr()) };
-    if c_line_ptr.is_null() {
-        return None
-    }
+    let _s = unsafe { ffi::CStr::from_ptr(c_s) };
 
-    let c_line = unsafe { ffi::CStr::from_ptr(c_line_ptr) };
+    str::from_utf8(_s.to_bytes()).ok()
+}
 
-    match str::from_utf8(c_line.to_bytes()) {
-        Ok(line) => Some(line),
+fn str_to_cstr(s: &str) -> Option<*const c_char> {
+    match ffi::CString::new(s) {
+        Ok(c_s) => Some(c_s.as_ptr()),
         Err(..) => None
     }
 }
 
+fn str_to_dup_cstr(s: &str) -> Option<*mut c_char> {
+    let c_s = require!(str_to_cstr(s));
 
-pub fn read_history(filename: &str) -> Result<(), io::Error> {
-    let c_filename = ffi::CString::new(filename).unwrap();
+    let dup = unsafe { malloc((s.len() + 1) as size_t) as *mut c_char };
+    if dup.is_null() {
+        return None;
+    }
 
-    let errno = unsafe {
-        c::read_history(c_filename.as_ptr())
+    Some(unsafe { libc::strcpy(dup, c_s) })
+}
+
+pub fn line_buffer<'a>() -> Option<&'a str> {
+    cstr_to_str(c::rl_line_buffer)
+}
+
+pub fn readline(prompt: &str) -> Option<&str> {
+    let c_prompt = require!(str_to_cstr(prompt));
+
+    let c_line = unsafe { c::readline(c_prompt) };
+
+    cstr_to_str(c_line)
+}
+
+
+pub fn read_history(filename: &str) -> bool {
+    let c_filename = match str_to_cstr(filename) {
+        Some(filename) => filename,
+        None => return false
     };
 
-    if errno == 0 {
-        return Ok(());
-    } else {
-        return Err(io::Error::new(io::ErrorKind::Other,
-                                  format!("Unable read history file from {}", filename)));
+    match unsafe { c::read_history(c_filename) } {
+        0 => true,
+        _ => false
     }
 }
 
-pub fn write_history(filename: &str) -> Result<(), io::Error> {
-    let c_filename = ffi::CString::new(filename).unwrap();
-
-    let errno = unsafe {
-        c::write_history(c_filename.as_ptr())
+pub fn write_history(filename: &str) -> bool {
+    let c_filename = match str_to_cstr(filename) {
+        Some(c_s) => c_s,
+        None => return false
     };
 
-    if errno == 0 {
-        return Ok(());
-    } else {
-        return Err(io::Error::new(io::ErrorKind::Other,
-                                  format!("Unable write history file to {}", filename)));
+    match unsafe { c::write_history(c_filename) } {
+        0 => true,
+        _ => false
     }
 }
 
-pub fn add_history(line: &str) {
-    let c_line = ffi::CString::new(line).unwrap();
 
-    unsafe {
-        c::add_history(c_line.as_ptr())
-    };
+pub fn add_history(line: &str) -> bool {
+    match str_to_cstr(line) {
+        Some(c_s) => { unsafe { c::add_history(c_s) }; true },
+        None => false
+    }
 }
 
 
@@ -126,35 +146,52 @@ pub fn bind_key(key: Key, callback: extern fn()->Status) {
 }
 
 
-pub type ListPossibFn = fn(line: &str) -> Vec<&str>;
+pub type ListPossibFn = fn(word: &str) -> Vec<&str>;
 static mut list_possib_fn : Option<ListPossibFn> = None;
 
-extern fn list_possib_bridge(c_line: *const c_char, c_possib_ptr: *mut*mut*mut c_char) -> c_int {
+extern fn list_possib_bridge(c_word: *const c_char, c_possib_ptr: *mut*mut*mut c_char) -> c_int {
     use std::slice;
 
-    let line_cstr = unsafe { ffi::CStr::from_ptr(c_line) };
-    let line = str::from_utf8(line_cstr.to_bytes()).unwrap();
+    let word = match cstr_to_str(c_word) {
+        Some(word) => word,
+        None => return 0 as c_int
+    };
 
     let possib_fn = unsafe { list_possib_fn.unwrap() };
-    let possib = possib_fn(line);
+    let possib = possib_fn(word);
 
     let c_possib_sz = (mem::size_of::<*mut c_char>() * possib.len()) as size_t;
     let c_possib = unsafe {
-        slice::from_raw_parts_mut(malloc(c_possib_sz) as *mut*mut c_char, possib.len())
+        let mem = malloc(c_possib_sz) as *mut*mut c_char;
+        if mem.is_null() {
+            return 0 as c_int;
+        }
+
+        slice::from_raw_parts_mut(mem, possib.len())
     };
 
+    let mut ok = 0;
+
     for i in 0..possib.len() {
-        let entry_cstr = ffi::CString::new(possib[i]).unwrap();
+        match str_to_dup_cstr(possib[i]) {
+            Some(c_entry) => {
+                c_possib[ok] = c_entry;
+                ok += 1;
+            },
 
-        c_possib[i] = unsafe { malloc((possib[i].len() + 1) as size_t) as *mut c_char };
+            None => ()
+        }
+    }
 
-        unsafe { libc::strcpy(c_possib[i], entry_cstr.as_ptr()) };
+    if ok == 0 {
+        unsafe { free(c_possib.as_ptr() as *mut c_void) };
+        return 0 as c_int;
     }
 
     unsafe {
         *c_possib_ptr = c_possib.as_ptr() as *mut*mut c_char;
     }
-    return possib.len() as c_int;
+    return ok as c_int;
 }
 
 pub fn set_list_possib(cb: ListPossibFn) {
@@ -165,32 +202,25 @@ pub fn set_list_possib(cb: ListPossibFn) {
 }
 
 
-pub type CompleteFn = fn(line: &str) -> Option<&str>;
+pub type CompleteFn = fn(word: &str) -> Option<&str>;
 static mut complete_fn : Option<CompleteFn> = None;
 
-extern fn complete_bridge(c_line: *const c_char, found: *mut c_int) -> *mut c_char {
-    let line_cstr = unsafe { ffi::CStr::from_ptr(c_line) };
-    let line = str::from_utf8(line_cstr.to_bytes()).unwrap();
-
-    let complete = unsafe {
-        match complete_fn {
-            None => None,
-            Some(cb) => cb(line)
-        }
+extern fn complete_bridge(c_word: *const c_char, found: *mut c_int) -> *mut c_char {
+    let word = match cstr_to_str(c_word) {
+        Some(word) => word,
+        None => return ptr::null_mut::<c_char>()
     };
 
-    match complete {
-        None => ptr::null_mut::<c_char>(),
-        Some(text) => {
-            let cstr_text = ffi::CString::new(text).unwrap();
+    let complete = unsafe { complete_fn.unwrap() };
 
-            unsafe {
-                let c_text = malloc((text.len() + 1) as size_t) as *mut c_char;
+    let text = match complete(word) {
+        Some(text) => text,
+        None => return ptr::null_mut::<c_char>()
+    };
 
-                *found = 1;
-                libc::strcpy(c_text, cstr_text.as_ptr())
-            }
-        }
+    match str_to_dup_cstr(text) {
+        Some(c_text) => { unsafe { *found = 1 }; c_text },
+        None => ptr::null_mut::<c_char>()
     }
 }
 
