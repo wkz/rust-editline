@@ -3,14 +3,9 @@ extern crate libc;
 use libc::{c_char, c_int, c_void, free, malloc, size_t};
 
 use std::ffi;
-use std::io;
 use std::mem;
 use std::ptr;
 use std::str;
-
-macro_rules! require {
-    ($e:expr) => (match $e { Some(e) => e, None => return None })
-}
 
 mod c {
     use libc::{c_char, c_int};
@@ -56,67 +51,69 @@ fn cstr_to_str<'a>(c_s: *const c_char) -> Option<&'a str> {
     str::from_utf8(_s.to_bytes()).ok()
 }
 
-fn str_to_cstr(s: &str) -> Option<*const c_char> {
-    match ffi::CString::new(s) {
-        Ok(c_s) => Some(c_s.as_ptr()),
-        Err(..) => None
-    }
-}
-
 fn str_to_dup_cstr(s: &str) -> Option<*mut c_char> {
-    let c_s = require!(str_to_cstr(s));
+    let c_s = match ffi::CString::new(s) {
+        Ok(c_s) => c_s,
+        Err(..) => return None
+    };
 
     let dup = unsafe { malloc((s.len() + 1) as size_t) as *mut c_char };
     if dup.is_null() {
         return None;
     }
 
-    Some(unsafe { libc::strcpy(dup, c_s) })
+    Some(unsafe { libc::strcpy(dup, c_s.as_ptr()) })
 }
+
 
 pub fn line_buffer<'a>() -> Option<&'a str> {
     cstr_to_str(c::rl_line_buffer)
 }
 
 pub fn readline(prompt: &str) -> Option<&str> {
-    let c_prompt = require!(str_to_cstr(prompt));
+    let c_prompt = match ffi::CString::new(prompt) {
+        Ok(c_prompt) => c_prompt,
+        Err(..) => return None
+    };
 
-    let c_line = unsafe { c::readline(c_prompt) };
+    let c_line = unsafe { c::readline(c_prompt.as_ptr()) };
 
     cstr_to_str(c_line)
 }
 
 
 pub fn read_history(filename: &str) -> bool {
-    let c_filename = match str_to_cstr(filename) {
-        Some(filename) => filename,
-        None => return false
+    let c_filename = match ffi::CString::new(filename) {
+        Ok(c_filename) => c_filename,
+        Err(..) => return false
     };
 
-    match unsafe { c::read_history(c_filename) } {
+    match unsafe { c::read_history(c_filename.as_ptr()) } {
         0 => true,
         _ => false
     }
 }
 
 pub fn write_history(filename: &str) -> bool {
-    let c_filename = match str_to_cstr(filename) {
-        Some(c_s) => c_s,
-        None => return false
+    let c_filename = match ffi::CString::new(filename) {
+        Ok(c_filename) => c_filename,
+        Err(..) => return false
     };
 
-    match unsafe { c::write_history(c_filename) } {
+    match unsafe { c::write_history(c_filename.as_ptr()) } {
         0 => true,
         _ => false
     }
 }
 
-
 pub fn add_history(line: &str) -> bool {
-    match str_to_cstr(line) {
-        Some(c_s) => { unsafe { c::add_history(c_s) }; true },
-        None => false
-    }
+    let c_line = match ffi::CString::new(line) {
+        Ok(c_line) => c_line,
+        Err(..) => return false
+    };
+
+    unsafe { c::add_history(c_line.as_ptr()) };
+    true
 }
 
 
