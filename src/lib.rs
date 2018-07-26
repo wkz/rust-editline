@@ -23,7 +23,7 @@ mod c {
     type CompleteFn = extern fn(*const c_char, *mut c_int) -> *mut c_char;
     type ListPossibFn = extern fn(*const c_char, *mut*mut*mut c_char) -> c_int;
 
-    #[link(name = "editline")]
+    #[link(name = "edit")]
     extern {
         pub static rl_line_buffer : *mut c_char;
 
@@ -67,7 +67,9 @@ fn str_to_dup_cstr(s: &str) -> Option<*mut c_char> {
 
 
 pub fn line_buffer<'a>() -> Option<&'a str> {
-    cstr_to_str(c::rl_line_buffer)
+    unsafe {
+        cstr_to_str(c::rl_line_buffer)
+    }
 }
 
 pub fn readline(prompt: &str) -> Option<&str> {
@@ -144,7 +146,7 @@ pub fn bind_key(key: Key, callback: extern fn()->Status) {
 
 
 pub type ListPossibFn = fn(word: &str) -> Vec<&str>;
-static mut list_possib_fn : Option<ListPossibFn> = None;
+static mut LIST_POSSIBLE_FN : Option<ListPossibFn> = None;
 
 extern fn list_possib_bridge(c_word: *const c_char, c_possib_ptr: *mut*mut*mut c_char) -> c_int {
     use std::slice;
@@ -154,7 +156,7 @@ extern fn list_possib_bridge(c_word: *const c_char, c_possib_ptr: *mut*mut*mut c
         None => return 0 as c_int
     };
 
-    let possib_fn = unsafe { list_possib_fn.unwrap() };
+    let possib_fn = unsafe { LIST_POSSIBLE_FN.unwrap() };
     let possib = possib_fn(word);
 
     let c_possib_sz = (mem::size_of::<*mut c_char>() * possib.len()) as size_t;
@@ -193,14 +195,14 @@ extern fn list_possib_bridge(c_word: *const c_char, c_possib_ptr: *mut*mut*mut c
 
 pub fn set_list_possib(cb: ListPossibFn) {
     unsafe {
-        list_possib_fn = Some(cb);
+        LIST_POSSIBLE_FN = Some(cb);
         c::rl_set_list_possib_func(list_possib_bridge);
     }
 }
 
 
 pub type CompleteFn = fn(word: &str) -> Option<&str>;
-static mut complete_fn : Option<CompleteFn> = None;
+static mut COMPLETE_FN : Option<CompleteFn> = None;
 
 extern fn complete_bridge(c_word: *const c_char, found: *mut c_int) -> *mut c_char {
     let word = match cstr_to_str(c_word) {
@@ -208,7 +210,7 @@ extern fn complete_bridge(c_word: *const c_char, found: *mut c_int) -> *mut c_ch
         None => return ptr::null_mut::<c_char>()
     };
 
-    let complete = unsafe { complete_fn.unwrap() };
+    let complete = unsafe { COMPLETE_FN.unwrap() };
 
     let text = match complete(word) {
         Some(text) => text,
@@ -223,7 +225,7 @@ extern fn complete_bridge(c_word: *const c_char, found: *mut c_int) -> *mut c_ch
 
 pub fn set_complete(cb: CompleteFn) {
     unsafe {
-        complete_fn = Some(cb);
+        COMPLETE_FN = Some(cb);
         c::rl_set_complete_func(complete_bridge);
     }
 }
