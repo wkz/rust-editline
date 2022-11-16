@@ -1,9 +1,8 @@
 extern crate editline;
 use editline::*;
 
-const CMDS : [&'static str; 8] = [
-    "foo ", "bar ", "bsd ", "cli ",
-    "ls ", "cd ", "malloc ", "tee "
+const CMDS: [&'static str; 8] = [
+    "foo ", "bar ", "bsd ", "cli ", "ls ", "cd ", "malloc ", "tee ",
 ];
 
 fn list_possib(word: &str) -> Vec<&str> {
@@ -27,7 +26,7 @@ fn complete(word: &str) -> Option<&str> {
     }
 }
 
-extern fn do_exit() -> Status {
+extern "C" fn do_exit() -> Status {
     println!("Bye bye!");
     return Status::EOF;
 }
@@ -43,7 +42,7 @@ fn main() {
     loop {
         match readline("cli> ") {
             Some(line) => println!("\t\t\t|{}|", line),
-            None => break
+            None => break,
         }
     }
 
