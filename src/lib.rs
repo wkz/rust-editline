@@ -67,7 +67,7 @@ fn str_to_dup_cstr(s: &str) -> Option<*mut c_char> {
 
 
 pub fn line_buffer<'a>() -> Option<&'a str> {
-    cstr_to_str(c::rl_line_buffer)
+    unsafe { cstr_to_str(c::rl_line_buffer) }
 }
 
 pub fn readline(prompt: &str) -> Option<&str> {
